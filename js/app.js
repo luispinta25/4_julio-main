@@ -12,6 +12,7 @@ let filteredLotes = [];
 
 // Constants
 const REGULARIZACION_CORTE_FECHA = '2025-11-30';
+const APP_VERSION = window.__APP_VERSION__ || '5.1.3';
 
 // DOM Elements
 const loginView = document.getElementById('login-view');
@@ -127,6 +128,8 @@ async function initApp() {
         console.error('Supabase client not initialized');
         return;
     }
+
+    syncSidebarVersion();
 
     // Check session
     const { data: { session } } = await client.auth.getSession();
@@ -304,6 +307,8 @@ async function handleSession(session, userData = null) {
         userProfile = userData;
     }
 
+    resetViewStateForSession();
+    hydratePreloadedDataFromCache();
     updateUI();
     showApp();
     setActiveNav('dashboard');
@@ -325,6 +330,7 @@ async function logout() {
     await client.auth.signOut();
     currentUser = null;
     userProfile = null;
+    resetViewStateForSession();
     showLogin();
 }
 
@@ -339,16 +345,40 @@ function showLogin() {
 function showApp() {
     loginView.classList.add('hidden');
     appLayout.classList.remove('hidden');
+    syncReadOnlyMode();
     startLivePoller();
 }
 
 function updateUI() {
     if (userProfile) {
         userNameDisplay.textContent = userProfile.nombre;
-        userRoleDisplay.textContent = userProfile.rol;
+        userRoleDisplay.textContent = isReadOnlyUser() ? `${userProfile.rol} | Solo lectura` : userProfile.rol;
     }
 
+    syncSidebarVersion();
+    syncReadOnlyMode();
+    syncDashboardGreeting();
+
     applyModuleVisibility();
+}
+
+function resetViewStateForSession() {
+    viewCache.clear();
+    currentViewName = null;
+    if (mainContent) {
+        mainContent.innerHTML = '';
+    }
+}
+
+function syncDashboardGreeting() {
+    const greetingEl = document.getElementById('dash-greeting');
+    if (!greetingEl || !userProfile?.nombre) return;
+    greetingEl.textContent = `${getTimeBasedGreeting()}, ${userProfile.nombre}`;
+}
+
+function syncSidebarVersion() {
+    const versionEl = document.getElementById('sidebar-version');
+    if (versionEl) versionEl.textContent = `v${APP_VERSION}`;
 }
 
 function showError(message) {
@@ -431,7 +461,7 @@ async function loadView(viewName) {
         }
 
         beginLoading('Cargando módulo...');
-        const response = await fetch(`views/${viewName}.html`);
+        const response = await fetch(`views/${viewName}.html`, { cache: 'no-store' });
         if (!response.ok) throw new Error('View not found');
         const html = await response.text();
 
@@ -481,8 +511,39 @@ async function loadView(viewName) {
 // ==========================================
 // SHARED HELPERS (PAGOS)
 // ==========================================
+function getCurrentUserRole() {
+    return String(userProfile?.rol || '').toLowerCase().trim();
+}
+
 function isAdmin() {
-    return (userProfile?.rol || '').toLowerCase() === 'admin';
+    return getCurrentUserRole() === 'admin';
+}
+
+function isReadOnlyUser() {
+    return getCurrentUserRole() === 'user';
+}
+
+function canMutateApp() {
+    return !isReadOnlyUser();
+}
+
+function getReadOnlyRoleMessage(action = 'realizar cambios') {
+    return `Acceso restringido: el rol USER es solo lectura y no puede ${action}.`;
+}
+
+function ensureCanMutate(targetEl = null, action = 'realizar cambios') {
+    if (canMutateApp()) return true;
+    const message = getReadOnlyRoleMessage(action);
+    if (targetEl) {
+        setInlineMessage(targetEl, message, 'error');
+    } else {
+        showAlert('Modo solo lectura', message);
+    }
+    return false;
+}
+
+function syncReadOnlyMode() {
+    document.body.classList.toggle('app-read-only', isReadOnlyUser());
 }
 
 function parseUserModules(modulosRaw) {
@@ -570,19 +631,20 @@ async function preloadAllData() {
     try {
         const client = getSupabaseClient();
 
-        // Precargar socios
-        const { data: socios, error: sociosError } = await client
-            .from('unoric_socios')
-            .select('*')
-            .order('socio', { ascending: true });
+        const [sociosResult, lotesResult] = await Promise.all([
+            client
+                .from('unoric_socios')
+                .select('*')
+                .order('socio', { ascending: true }),
+            client
+                .from('unoric_lotes')
+                .select('*')
+        ]);
+
+        const { data: socios, error: sociosError } = sociosResult;
+        const { data: lotes, error: lotesError } = lotesResult;
 
         if (sociosError) throw sociosError;
-
-        // Precargar lotes
-        const { data: lotes, error: lotesError } = await client
-            .from('unoric_lotes')
-            .select('*');
-
         if (lotesError) throw lotesError;
 
         // Guardar en memoria global
@@ -608,8 +670,8 @@ async function preloadAllData() {
 
 // Cache keys para dashboard
 const DASHBOARD_CACHE_KEY = 'unoric_dashboard_cache_v1';
-const LOTES_CACHE_KEY = 'unoric_lotes_cache_v1';
-const CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24; // 24 horas
+const LOTES_CACHE_KEY = 'unoric_lotes_cache_v2';
+const CACHE_MAX_AGE_MS = 1000 * 60 * 15; // 15 minutos
 
 // Escribir caché del dashboard
 function writeDashboardCache(stats) {
@@ -971,7 +1033,7 @@ function extractLogoDataUrlFromBlob(blob) {
 async function loadImageAsPngDataUrl(url) {
     // Best-effort: try fetch -> canvas -> png dataURL. Fallback to raw dataURL if already image/png.
     try {
-        const res = await fetch(url, { cache: 'force-cache' });
+        const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) return '';
         const blob = await res.blob();
 
@@ -1029,13 +1091,17 @@ async function fetchSociosForReportCached() {
 }
 
 async function getAllLotesForReport() {
-    const cached = readLotesCache();
-    if (cached && Array.isArray(cached)) return cached;
     const client = getSupabaseClient();
-    const { data, error } = await client.from('unoric_lotes').select('*');
-    if (error) throw error;
-    writeLotesCache(data || []);
-    return data || [];
+    try {
+        const { data, error } = await client.from('unoric_lotes').select('*');
+        if (error) throw error;
+        writeLotesCache(data || []);
+        return data || [];
+    } catch (error) {
+        const cached = readLotesCache();
+        if (cached && Array.isArray(cached)) return cached;
+        throw error;
+    }
 }
 
 function getSocioCedulaFromLote(lote) {
@@ -1883,19 +1949,14 @@ function setInlineMessage(el, message, type) {
 // ==========================================
 // SOCIOS CACHE (para búsquedas locales)
 // ==========================================
-const SOCIOS_CACHE_KEY = 'unoric_socios_cache_v1';
-const SOCIOS_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 14; // 14 días
+const SOCIOS_CACHE_KEY = 'unoric_socios_cache_v2';
+const SOCIOS_CACHE_MAX_AGE_MS = 1000 * 60 * 30; // 30 minutos
 
 function writeSociosQuickCache(socios) {
     try {
         const payload = {
             savedAt: Date.now(),
-            socios: (socios || []).map(s => ({
-                cedula: s.cedula,
-                socio: s.socio,
-                estado: s.estado,
-                socio_desde: s.socio_desde
-            }))
+            socios: Array.isArray(socios) ? socios : []
         };
         localStorage.setItem(SOCIOS_CACHE_KEY, JSON.stringify(payload));
     } catch (_) {
@@ -1928,8 +1989,31 @@ function getSociosQuickList() {
     }
     // Fallback: localStorage
     const cached = readSociosQuickCache();
-    if (cached && cached.length) return cached;
+    if (cached && cached.length) {
+        return cached.map(s => ({
+            cedula: s.cedula,
+            socio: s.socio,
+            estado: s.estado,
+            socio_desde: s.socio_desde
+        }));
+    }
     return [];
+}
+
+function hydratePreloadedDataFromCache() {
+    const cachedLotes = readLotesCache();
+    const cachedSocios = readSociosQuickCache();
+
+    if (Array.isArray(cachedLotes) && cachedLotes.length) {
+        allLotes = cachedLotes;
+    }
+
+    if (Array.isArray(cachedSocios) && cachedSocios.length) {
+        allSocios = cachedSocios.map((socio) => ({
+            ...socio,
+            lotes: Array.isArray(allLotes) ? allLotes.filter(l => l.socio === socio.cedula) : []
+        }));
+    }
 }
 
 function looksLikeCedula(text) {
@@ -2456,6 +2540,7 @@ let cobrosState = {
 };
 
 async function initCobrosModule() {
+    const canMutate = canMutateApp();
     const cedulaInput = document.getElementById('cobros-cedula');
     const buscarBtn = document.getElementById('cobros-buscar');
     const clearBtn = document.getElementById('cobros-clear');
@@ -2605,7 +2690,7 @@ async function initCobrosModule() {
         pagoMonto.value = '';
         pagoReferencia.value = '';
         pagoObservaciones.value = '';
-        setInlineMessage(pagoMsg, '', '');
+        setInlineMessage(pagoMsg, canMutate ? '' : getReadOnlyRoleMessage('registrar cobros'), canMutate ? '' : 'error');
     }
 
     if (closeModalRecaudacion) {
@@ -2651,7 +2736,7 @@ async function initCobrosModule() {
                     <td class="text-sm">${it.detail} ${it.kind !== 'pagado' ? `(${state.loteCount} lotes)` : ''}</td>
                     <td><strong>${badge}</strong><br/><span class="text-sm">${pendTxt}</span></td>
                     <td>
-                        ${!isPagado ? `<button class="btn btn-primary btn-sm btn-action-mens" data-key="${it.key}">Cobrar</button>` : '—'}
+                        ${!isPagado ? `<button class="btn btn-primary btn-sm btn-action-mens" data-key="${it.key}" ${canMutate ? '' : 'disabled'}>${canMutate ? 'Cobrar' : 'Solo lectura'}</button>` : '—'}
                     </td>
                 </tr>
             `;
@@ -2695,7 +2780,7 @@ async function initCobrosModule() {
                     <td>${lotes}</td>
                     <td><span class="badge badge-danger">$${formatMoney(pendiente)}</span></td>
                     <td>
-                        <button class="btn btn-primary btn-sm btn-action-otro" data-id="${o.id}">Cobrar</button>
+                        <button class="btn btn-primary btn-sm btn-action-otro" data-id="${o.id}" ${canMutate ? '' : 'disabled'}>${canMutate ? 'Cobrar' : 'Solo lectura'}</button>
                     </td>
                 </tr>
             `;
@@ -2711,6 +2796,7 @@ async function initCobrosModule() {
     }
 
     function selectItem(kind, item) {
+        if (!ensureCanMutate(pagoMsg, 'registrar cobros')) return;
         state.selection = { kind, item };
         const lc = Number(state.loteCount || 0);
         setInlineMessage(pagoMsg, '', '');
@@ -2844,6 +2930,9 @@ async function initCobrosModule() {
                 if (!activo) {
                     setInlineMessage(pagoMsg, 'Socio retirado: consulte con tesorería.', 'error');
                     pagoSubmit.disabled = true;
+                } else if (!canMutate) {
+                    pagoSubmit.disabled = true;
+                    setInlineMessage(pagoMsg, getReadOnlyRoleMessage('registrar cobros'), 'error');
                 }
 
             } catch (err) {
@@ -2858,6 +2947,7 @@ async function initCobrosModule() {
 
     pagoForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!ensureCanMutate(pagoMsg, 'registrar cobros')) return;
         const sel = state.selection;
         if (!sel) return;
 
@@ -2929,6 +3019,7 @@ async function initCobrosModule() {
     // --- CARGO MANUAL ---
     if (btnCrearManual) {
         btnCrearManual.addEventListener('click', async () => {
+            if (!ensureCanMutate(pagoMsg, 'crear cargos manuales')) return;
             if (!state.socio) { 
                 await showAlert('Atención', 'Primero debes seleccionar un socio para asignarle un cargo.');
                 return; 
@@ -2960,6 +3051,7 @@ async function initCobrosModule() {
     if (formManual) {
         formManual.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (!ensureCanMutate(pagoMsg, 'crear cargos manuales')) return;
             const tipoId = document.getElementById('manual-tipo').value;
             const desc = document.getElementById('manual-desc').value;
             const unit = Number(manualUnitario.value);
@@ -3595,6 +3687,11 @@ async function initCajaModule() {
     const btnGenerador = document.getElementById('caja-goto-generador');
     const btnMensualidades = document.getElementById('caja-goto-mensualidades');
 
+    if (btnGenerador && isReadOnlyUser()) {
+        btnGenerador.disabled = true;
+        btnGenerador.title = getReadOnlyRoleMessage('generar cobros masivos');
+    }
+
     if (btnCobros) {
         btnCobros.addEventListener('click', () => {
             setActiveNav('cobros');
@@ -3626,6 +3723,7 @@ let cuotasState = {
 };
 
 async function initCrearCuotasModule() {
+    const canMutate = canMutateApp();
     const backBtn = document.getElementById('cuotas-back-btn');
     const tipoPagoSelect = document.getElementById('cuotas-tipo-pago');
     const fechaInput = document.getElementById('cuotas-fecha');
@@ -3642,6 +3740,13 @@ async function initCrearCuotasModule() {
     const generarBtn = document.getElementById('cuotas-generar-btn');
     const countMsg = document.getElementById('cuotas-count-msg');
     const globalMsg = document.getElementById('cuotas-global-msg');
+
+    if (!canMutate) {
+        [tipoPagoSelect, fechaInput, descripcionInput, montoInput, generarBtn].forEach(el => {
+            if (el) el.disabled = true;
+        });
+        setInlineMessage(globalMsg, getReadOnlyRoleMessage('generar o eliminar cobros masivos'), 'error');
+    }
 
     fechaInput.value = todayISODate();
 
@@ -3716,13 +3821,14 @@ async function initCrearCuotasModule() {
         const list = cuotasState.sociosFiltrados;
         if (countMsg) countMsg.textContent = `Se han encontrado ${list.length} socios que cumplen los criterios.`;
         
-        generarBtn.disabled = list.length === 0;
-        generarBtn.innerHTML = `<i class="fas fa-bolt"></i> Generar ${list.length} Pagos Masivos`;
+        generarBtn.disabled = !canMutate || list.length === 0;
+        generarBtn.innerHTML = `<i class="fas fa-bolt"></i> ${canMutate ? 'Generar' : 'Ver'} ${list.length} Pagos Masivos`;
         
         // La tabla ha sido eliminada por solicitud del usuario para simplificar.
     }
 
     generarBtn.addEventListener('click', async () => {
+        if (!ensureCanMutate(globalMsg, 'generar cobros masivos')) return;
         if (!isAdmin()) {
             setInlineMessage(globalMsg, 'Error: Solo un administrador puede realizar esta acción.', 'error');
             return;
@@ -3900,9 +4006,7 @@ async function initCrearCuotasModule() {
             // Renderizar con animación
             pagosExistentesBody.innerHTML = grupos.map((g, index) => `
                 <div class="card animate-fade-in-stretch" style="padding: 0.6rem; min-width: 170px; flex: 1 1 calc(25% - 0.75rem); border: 1px solid #eef2f7; box-shadow: 0 2px 4px rgba(0,0,0,0.04); background: #fff; animation-delay: ${index * 0.05}s; position: relative; group;">
-                    <button class="btn-delete-pago" data-descripcion="${g.descripcion}" style="position: absolute; top: 5px; right: 5px; background: none; border: none; color: #ef4444; cursor: pointer; padding: 2px; font-size: 0.8rem; opacity: 0.6; transition: 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Eliminar este grupo de pagos">
-                        <i class="fas fa-trash-alt"></i>
-                    </button>
+                    ${canMutate ? `<button class="btn-delete-pago" data-descripcion="${g.descripcion}" style="position: absolute; top: 5px; right: 5px; background: none; border: none; color: #ef4444; cursor: pointer; padding: 2px; font-size: 0.8rem; opacity: 0.6; transition: 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Eliminar este grupo de pagos"><i class="fas fa-trash-alt"></i></button>` : ''}
                     <div style="font-weight: 600; margin-bottom: 0.35rem; font-size: 0.85rem; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;" title="${g.descripcion}">
                         ${g.descripcion || '—'}
                     </div>
@@ -3948,6 +4052,7 @@ async function initCrearCuotasModule() {
         pagosExistentesBody.addEventListener('click', async (e) => {
             const btn = e.target.closest('.btn-delete-pago');
             if (!btn) return;
+            if (!ensureCanMutate(globalMsg, 'eliminar cobros masivos')) return;
 
             const descripcion = btn.dataset.descripcion;
             const currentAnioBtn = pagosExistentesBtns.querySelector('.btn-primary');
@@ -4003,6 +4108,7 @@ async function initCrearCuotasModule() {
 // ==========================================
 
 async function initSociosModule() {
+    const readOnly = isReadOnlyUser();
     const tableBody = document.getElementById('socios-table-body');
     const totalSociosEl = document.getElementById('total-socios');
     const sociosConLotesEl = document.getElementById('socios-con-lotes');
@@ -4072,6 +4178,8 @@ async function initSociosModule() {
         const newBtn = document.getElementById('socios-new-btn');
         if (newBtn && newBtn.dataset.bound !== 'true') {
             newBtn.dataset.bound = 'true';
+            newBtn.disabled = readOnly;
+            newBtn.title = readOnly ? getReadOnlyRoleMessage('crear socios') : '';
             newBtn.addEventListener('click', () => {
                 openSocioCreateModal();
             });
@@ -4102,6 +4210,7 @@ let mensState = {
 };
 
 async function initMensualidadModule() {
+    const canMutate = canMutateApp();
     const searchInput = document.getElementById('mens-search');
     const localResults = document.getElementById('mens-local-results');
     const socioInfo = document.getElementById('mens-socio-info');
@@ -4123,6 +4232,13 @@ async function initMensualidadModule() {
     const pagoMsg = document.getElementById('mens-pago-msg');
 
     fechaEl.value = todayISODate();
+
+    if (!canMutate) {
+        [fechaEl, hastaMesEl, montoEl, refEl, obsEl, submitBtn].forEach(el => {
+            if (el) el.disabled = true;
+        });
+        setInlineMessage(pagoMsg, getReadOnlyRoleMessage('registrar cobros'), 'error');
+    }
 
     function resetSelection() {
         mensState.selectedPago = null;
@@ -4150,6 +4266,11 @@ async function initMensualidadModule() {
         if (bloqueado) {
             resetSelection();
             setInlineMessage(msgEl, 'Socio retirado: no se pueden registrar cobros.', 'error');
+        }
+        if (!canMutate) {
+            resetSelection();
+            setInlineMessage(msgEl, getReadOnlyRoleMessage('registrar cobros'), 'error');
+            return false;
         }
         return !bloqueado;
     }
@@ -4242,9 +4363,9 @@ async function initMensualidadModule() {
                 ? `$${formatMoney(it.feePerLote)}`
                 : '-';
 
-            const canPay = it.kind === 'pendiente' && mensState.socioActivo;
+            const canPay = it.kind === 'pendiente' && mensState.socioActivo && canMutate;
             const disabledAttr = canPay ? '' : 'disabled';
-            const actionText = !mensState.socioActivo ? 'Bloqueado' : (it.kind === 'pendiente' ? 'Cobrar' : '—');
+            const actionText = !mensState.socioActivo ? 'Bloqueado' : (!canMutate ? 'Solo lectura' : (it.kind === 'pendiente' ? 'Cobrar' : '—'));
 
             return `
                 <tr>
@@ -4264,6 +4385,7 @@ async function initMensualidadModule() {
         body.querySelectorAll('button[data-item]').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (!mensState.socio) return;
+                if (!ensureCanMutate(pagoMsg, 'registrar cobros')) return;
                 if (!mensState.socioActivo) {
                     setInlineMessage(msgEl, 'Socio retirado: no se pueden registrar cobros.', 'error');
                     return;
@@ -4441,6 +4563,7 @@ async function initMensualidadModule() {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         setInlineMessage(pagoMsg, '', '');
+        if (!ensureCanMutate(pagoMsg, 'registrar cobros')) return;
         if (!mensState.socio) {
             setInlineMessage(pagoMsg, 'Selecciona un socio primero.', 'error');
             return;
@@ -4583,6 +4706,8 @@ function filterSocios(searchTerm, etapa, estado) {
 
 function renderSociosTable(socios) {
     const tableBody = document.getElementById('socios-table-body');
+    const readOnly = isReadOnlyUser();
+    const canEditSocio = isAdmin();
 
     if (socios.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">No se encontraron resultados</td></tr>`;
@@ -4641,8 +4766,8 @@ function renderSociosTable(socios) {
                 </td>
                 <td>${statusBadge}</td>
                 <td>
-                    <button class="btn btn-primary btn-sm" data-edit-socio="${socio.cedula}">
-                        <i class="fas fa-edit"></i>
+                    <button class="btn ${readOnly ? 'btn-secondary' : 'btn-primary'} btn-sm" data-edit-socio="${socio.cedula}">
+                        <i class="fas ${readOnly ? 'fa-eye' : 'fa-edit'}"></i>${canEditSocio ? '' : (readOnly ? ' Ver' : '')}
                     </button>
                 </td>
             </tr>
@@ -4663,6 +4788,7 @@ function renderSociosTable(socios) {
 // ==========================================
 
 async function initLotesModule() {
+    const canMutate = canMutateApp();
     const tableBody = document.getElementById('lotes-table-body');
     const totalLotesEl = document.getElementById('total-lotes');
     const lotesSinSocioEl = document.getElementById('lotes-sin-socio');
@@ -4777,6 +4903,10 @@ async function initLotesModule() {
             renderLotesTable(filteredLotes);
         });
 
+        if (btnNuevo) {
+            btnNuevo.disabled = !canMutate;
+            btnNuevo.title = canMutate ? '' : getReadOnlyRoleMessage('registrar lotes');
+        }
         btnNuevo?.addEventListener('click', () => abrirModalLote());
         closeLote?.addEventListener('click', () => modalLote.classList.add('hidden'));
         cancelLote?.addEventListener('click', () => modalLote.classList.add('hidden'));
@@ -4799,6 +4929,11 @@ function abrirModalLote(lote = null) {
     const title = document.getElementById('modal-lote-title');
     const form = document.getElementById('form-lote');
     const msg = document.getElementById('lote-msg');
+    const canMutate = canMutateApp();
+    const submitBtn = form?.querySelector('button[type="submit"]');
+    const editableFields = ['lote-etapa', 'lote-numero', 'lote-socio', 'lote-celular', 'lote-correo', 'lote-promesa']
+        .map(id => document.getElementById(id))
+        .filter(Boolean);
 
     msg.classList.add('hidden');
     form.reset();
@@ -4813,14 +4948,28 @@ function abrirModalLote(lote = null) {
         document.getElementById('lote-correo').value = lote.correo || '';
         document.getElementById('lote-promesa').value = lote.promesa || 'NO';
     } else {
-        title.textContent = 'Registrar Nuevo Lote';
+        title.textContent = canMutate ? 'Registrar Nuevo Lote' : 'Detalle de Lote';
         document.getElementById('lote-id-hidden').value = '';
+    }
+
+    if (lote && !canMutate) {
+        title.textContent = 'Detalle de Lote ' + lote.lote;
+    }
+
+    editableFields.forEach(el => {
+        el.disabled = !canMutate;
+    });
+    if (submitBtn) submitBtn.disabled = !canMutate;
+    if (!canMutate) {
+        setInlineMessage(msg, getReadOnlyRoleMessage('editar lotes'), 'error');
     }
 
     modal.classList.remove('hidden');
 }
 
 async function saveLote() {
+    const msgEl = document.getElementById('lote-msg');
+    if (!ensureCanMutate(msgEl, 'guardar lotes')) return;
     const id = document.getElementById('lote-id-hidden').value;
     const etapa = document.getElementById('lote-etapa').value;
     const numero = document.getElementById('lote-numero').value;
@@ -4828,8 +4977,6 @@ async function saveLote() {
     const celular = document.getElementById('lote-celular').value;
     const correo = document.getElementById('lote-correo').value;
     const promesa = document.getElementById('lote-promesa').value;
-    const msgEl = document.getElementById('lote-msg');
-
     const payload = {
         etapa: parseInt(etapa),
         lote: parseInt(numero),
@@ -4937,6 +5084,7 @@ function filterLotes(searchTerm, etapa, estado) {
 
 function renderLotesTable(lotes) {
     const tableBody = document.getElementById('lotes-table-body');
+    const canMutate = canMutateApp();
 
     if (lotes.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="6" class="text-center p-4">No se encontraron resultados</td></tr>`;
@@ -4969,9 +5117,9 @@ function renderLotesTable(lotes) {
         const phoneIcon = lote.invalidPhone ? '<i class="fas fa-exclamation-circle"></i>' : '<i class="fas fa-phone"></i>';
         const emailIcon = lote.invalidEmail ? '<i class="fas fa-exclamation-circle"></i>' : '<i class="fas fa-envelope"></i>';
 
-        const btnLabel = lote.socio ? 'Editar' : 'Asignar Socio';
-        const btnClass = lote.socio ? 'btn-primary' : 'btn-success';
-        const btnIcon = lote.socio ? 'fa-edit' : 'fa-user-plus';
+        const btnLabel = canMutate ? (lote.socio ? 'Editar' : 'Asignar Socio') : 'Ver';
+        const btnClass = canMutate ? (lote.socio ? 'btn-primary' : 'btn-success') : 'btn-secondary';
+        const btnIcon = canMutate ? (lote.socio ? 'fa-edit' : 'fa-user-plus') : 'fa-eye';
 
         return `
             <tr>
@@ -5026,10 +5174,12 @@ function renderLotesTable(lotes) {
 let evoState = {
     eventos: [],
     selectedEvento: null,
-    asistencias: []
+    asistencias: [],
+    readOnlyView: false
 };
 
 async function initConvocatoriasModule() {
+    const canMutate = canMutateApp();
     const btnNueva = document.getElementById('btn-nueva-convocatoria');
     const eventosBody = document.getElementById('eventos-body');
     const modalEvo = document.getElementById('modal-evento');
@@ -5051,6 +5201,11 @@ async function initConvocatoriasModule() {
     const btnFinalizar = document.getElementById('btn-finalizar-evento');
     const btnDescargar = document.getElementById('btn-descargar-asistencia');
 
+    if (btnNueva) {
+        btnNueva.disabled = !canMutate;
+        btnNueva.title = canMutate ? '' : getReadOnlyRoleMessage('crear convocatorias');
+    }
+
     await loadEventos();
 
     // Permitir actualización externa (poller) para el listado de eventos
@@ -5065,7 +5220,7 @@ async function initConvocatoriasModule() {
         const targetId = window.autoOpenEventoId;
         window.autoOpenEventoId = null; // Limpiar
         const ev = evoState.eventos.find(ex => ex.id === targetId);
-        if (ev) abrirControlAsistencia(ev);
+        if (ev) abrirControlAsistencia(ev, { readOnly: !canMutate });
     }
 
     btnNueva?.addEventListener('click', () => {
@@ -5131,6 +5286,7 @@ async function initConvocatoriasModule() {
     });
 
     btnFinalizar?.addEventListener('click', async () => {
+        if (!ensureCanMutate(null, 'finalizar eventos')) return;
         if (!evoState.selectedEvento) return;
         
         const ok = await showConfirm(`Finalizar ${evoState.selectedEvento.tipo}`, 
@@ -5381,14 +5537,14 @@ async function initConvocatoriasModule() {
                     <td><span class="badge ${statusClass}">${statusText}</span></td>
                     <td>
                         <div style="display: flex; gap: 5px;">
-                            ${effectiveStatus === 'PENDIENTE' ? `
+                            ${effectiveStatus === 'PENDIENTE' && canMutate ? `
                                 <button class="btn btn-secondary btn-sm btn-cancelar-evento" data-id="${ev.id}" title="Cancelar Evento" style="padding: 6px 10px; font-size: 0.75rem; color: #dc2626; border-color: #fca5a5;">
                                     <i class="fas fa-ban"></i>
                                 </button>
                             ` : ''}
                             ${effectiveStatus !== 'CANCELADO' ? `
                                 <button class="btn btn-primary btn-sm btn-gestion-asistencia" data-id="${ev.id}" style="padding: 6px 12px; font-size: 0.75rem;">
-                                    <i class="fas fa-clipboard-list mr-1"></i>${ev.estado === 'PENDIENTE' ? 'Iniciar Lista' : 'Gestionar'}
+                                    <i class="fas fa-clipboard-list mr-1"></i>${canMutate ? (ev.estado === 'PENDIENTE' ? 'Iniciar Lista' : 'Gestionar') : 'Ver'}
                                 </button>
                             ` : ''}
                             <button class="btn btn-secondary btn-sm btn-share-whatsapp" data-id="${ev.id}" style="padding: 6px 10px; font-size: 0.75rem; border-color: #25D366; color: #128C7E;">
@@ -5404,7 +5560,7 @@ async function initConvocatoriasModule() {
             btn.addEventListener('click', () => {
                 const id = btn.getAttribute('data-id');
                 const evento = evoState.eventos.find(e => e.id === id);
-                if (evento) abrirControlAsistencia(evento);
+                if (evento) abrirControlAsistencia(evento, { readOnly: !canMutate });
             });
         });
 
@@ -5544,6 +5700,7 @@ async function initConvocatoriasModule() {
     }
 
     async function saveEvento() {
+        if (!ensureCanMutate(msgEl, 'crear convocatorias')) return;
         const alcance = document.getElementById('evo-alcance').value;
         let manualSocios = [];
         
@@ -5609,6 +5766,7 @@ async function initConvocatoriasModule() {
     }
 
     async function cancelarEvento(eventoId) {
+        if (!ensureCanMutate(null, 'cancelar convocatorias')) return;
         await withLoader('Cancelando convocatoria...', async () => {
             try {
                 const client = getSupabaseClient();
@@ -5628,7 +5786,9 @@ async function initConvocatoriasModule() {
         });
     }
 
-    async function abrirControlAsistencia(evento) {
+    async function abrirControlAsistencia(evento, options = {}) {
+        const readOnly = options.readOnly === true || isReadOnlyUser();
+        evoState.readOnlyView = readOnly;
         evoState.selectedEvento = evento;
         document.getElementById('asistencia-evento-nombre').textContent = `${evento.tipo}: ${evento.descripcion}`;
         
@@ -5640,7 +5800,7 @@ async function initConvocatoriasModule() {
         seccionAsistencia?.classList.remove('hidden');
 
         // Toggle buttons based on state
-        if (evento.estado === 'FINALIZADO') {
+        if (readOnly || evento.estado === 'FINALIZADO') {
             btnFinalizar?.classList.add('hidden');
             btnDescargar?.classList.remove('hidden');
         } else {
@@ -5650,7 +5810,7 @@ async function initConvocatoriasModule() {
 
         await withLoader('Cargando lista de socios...', async () => {
             try {
-                await loadAsistencias(evento);
+                await loadAsistencias(evento, { readOnly });
             } catch (err) {
                 showAlert('Error', 'No se pudieron cargar las asistencias.');
                 btnVolverEvos.click();
@@ -5658,7 +5818,8 @@ async function initConvocatoriasModule() {
         });
     }
 
-    async function loadAsistencias(evento) {
+    async function loadAsistencias(evento, options = {}) {
+        const readOnly = options.readOnly === true || evoState.readOnlyView === true;
         const client = getSupabaseClient();
         
         const { data: exist, error: errE } = await client
@@ -5669,7 +5830,7 @@ async function initConvocatoriasModule() {
         if (errE) throw errE;
 
         // Si no hay asistencias y NO es manual (las manuales se crean al guardar), generamos ahora
-        if (evento.estado === 'PENDIENTE' && exist.length === 0 && evento.alcance !== 'MANUAL') {
+        if (!readOnly && evento.estado === 'PENDIENTE' && exist.length === 0 && evento.alcance !== 'MANUAL') {
             await generarAsistenciasIniciales(evento);
             const { data: nuevo, error: errN } = await client
                 .from('unoric_asistencias')
@@ -5684,7 +5845,7 @@ async function initConvocatoriasModule() {
         } else {
             evoState.asistencias = exist;
             // Si estaba pendiente pero ya tiene asistencias (ej manual), lo pasamos a EN_CURSO al abrirlo
-            if (evento.estado === 'PENDIENTE') {
+              if (!readOnly && evento.estado === 'PENDIENTE') {
                  await client.from('unoric_eventos').update({ estado: 'EN_CURSO' }).eq('id', evento.id);
                  evento.estado = 'EN_CURSO';
             }
@@ -5761,7 +5922,7 @@ async function initConvocatoriasModule() {
             return;
         }
 
-        const rowDisabled = evoState.selectedEvento.estado === 'FINALIZADO';
+        const rowDisabled = evoState.selectedEvento.estado === 'FINALIZADO' || evoState.readOnlyView === true;
         body.innerHTML = filtered.map(as => {
             const colorClass = as.estado === 'PUNTUAL' ? 'success' : (as.estado === 'ATRASADO' ? 'warning' : (as.estado === 'JUSTIFICADO' ? 'info' : 'danger'));
             return `
@@ -5799,6 +5960,7 @@ async function initConvocatoriasModule() {
     }
 
     async function registrarAsistencia(cedula, status) {
+        if (!ensureCanMutate(null, 'registrar asistencia')) return;
         const as = evoState.asistencias.find(x => x.cedula_socio === cedula);
         if (!as) return;
 

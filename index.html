@@ -124,6 +124,8 @@
                 </a>
             </nav>
 
+            <div id="sidebar-version" class="sidebar-version">v--</div>
+
             <div class="user-profile">
                 <div class="user-avatar">
                     <i class="fas fa-user"></i>
@@ -305,16 +307,58 @@
     </div>
 
     <!-- Scripts -->
-    <script src="js/config.js"></script>
+    <script>
+        window.__APP_VERSION__ = '5.1.3';
+    </script>
+    <script src="js/config.js?v=5.1.3"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="js/app.js?v=7"></script>
+    <script src="js/app.js?v=5.1.3"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./service-worker.js')
-                    .then(reg => console.log('Service Worker registrado con éxito:', reg.scope))
-                    .catch(err => console.error('Error al registrar el Service Worker:', err));
+            window.addEventListener('load', async () => {
+                const appVersion = window.__APP_VERSION__ || '5.1.3';
+                const updateMarkerKey = 'unoric-sw-updated-version';
+
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (sessionStorage.getItem(updateMarkerKey) === appVersion) return;
+                    sessionStorage.setItem(updateMarkerKey, appVersion);
+                    window.location.reload();
+                });
+
+                const activateUpdate = (worker) => {
+                    if (worker) worker.postMessage({ type: 'SKIP_WAITING' });
+                };
+
+                try {
+                    const reg = await navigator.serviceWorker.register(`./service-worker.js?v=${appVersion}`);
+                    const versionEl = document.getElementById('sidebar-version');
+                    if (versionEl) versionEl.textContent = `v${appVersion}`;
+
+                    if (reg.waiting) {
+                        activateUpdate(reg.waiting);
+                    }
+
+                    reg.addEventListener('updatefound', () => {
+                        const newWorker = reg.installing;
+                        if (!newWorker) return;
+
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                activateUpdate(newWorker);
+                            }
+                        });
+                    });
+
+                    window.addEventListener('focus', () => {
+                        reg.update().catch((err) => console.warn('No se pudo verificar nueva versión:', err));
+                    });
+
+                    reg.update().catch((err) => console.warn('No se pudo forzar revisión del SW:', err));
+                    console.log('Service Worker registrado con éxito:', reg.scope);
+                } catch (err) {
+                    console.error('Error al registrar el Service Worker:', err);
+                }
             });
         }
     </script>

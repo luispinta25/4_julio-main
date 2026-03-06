@@ -1,82 +1,121 @@
-const CACHE_NAME = 'unoric-v1.3';
-const ASSETS = [
+const APP_VERSION = '5.1.3';
+const SHELL_CACHE_NAME = `unoric-shell-${APP_VERSION}`;
+const DATA_CACHE_NAME = `unoric-data-${APP_VERSION}`;
+const CDN_ORIGINS = new Set([
+  'https://cdnjs.cloudflare.com',
+  'https://cdn.jsdelivr.net'
+]);
+const APP_SHELL_ASSETS = [
   './',
   './index.html',
+  './manifest.json',
   './css/styles.css',
   './css/socios.css',
   './css/lotes.css',
   './css/pagos.css',
-  './js/app.js',
-  './js/config.js',
+  './js/app.js?v=5.1.3',
+  './js/config.js?v=5.1.3',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+  'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js'
 ];
 
-// Install Service Worker
+function isCacheableResponse(response) {
+  return response && response.ok && (response.type === 'basic' || response.type === 'cors');
+}
+
+function isSociosOrLotesRequest(url) {
+  return url.pathname.includes('/rest/v1/unoric_socios') || url.pathname.includes('/rest/v1/unoric_lotes');
+}
+
+function shouldHandleWithNetworkFirst(request, url) {
+  if (request.mode === 'navigate') return true;
+  if (url.origin === self.location.origin) return true;
+  return CDN_ORIGINS.has(url.origin);
+}
+
+async function addShellAssets(cache) {
+  await Promise.allSettled(
+    APP_SHELL_ASSETS.map((asset) => cache.add(asset))
+  );
+}
+
+async function networkFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+
+  try {
+    const response = await fetch(request);
+    if (isCacheableResponse(response)) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    const cachedResponse = await cache.match(request);
+    if (cachedResponse) return cachedResponse;
+    throw error;
+  }
+}
+
+async function staleWhileRevalidate(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cachedResponse = await cache.match(request);
+
+  const networkPromise = fetch(request)
+    .then((response) => {
+      if (isCacheableResponse(response)) {
+        cache.put(request, response.clone());
+      }
+      return response;
+    })
+    .catch(() => null);
+
+  if (cachedResponse) {
+    return cachedResponse;
+  }
+
+  const networkResponse = await networkPromise;
+  if (networkResponse) return networkResponse;
+
+  return fetch(request);
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
-    })
+    caches.open(SHELL_CACHE_NAME).then((cache) => addShellAssets(cache))
   );
   self.skipWaiting();
 });
 
-// Activate Service Worker
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      );
-    })
+    caches.keys().then((keys) => Promise.all(
+      keys
+        .filter((key) => key !== SHELL_CACHE_NAME && key !== DATA_CACHE_NAME)
+        .map((key) => caches.delete(key))
+    )).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Fetch events
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
-  // Detectar si es una petición a la API de Supabase (dominio personalizado o estándar)
-  const isSupabase = event.request.url.includes('supabase.co') || 
-                     event.request.url.includes('luispintasolutions.com') ||
-                     event.request.url.includes('/rest/v1/');
-  
-  const isView = event.request.url.includes('/views/');
-  
-  if (isSupabase || isView) {
-    // Network First strategy para API y Vistas
-    event.respondWith(
-      fetch(event.request).then((response) => {
-        // Solo cacheamos vistas exitosas. LA API NUNCA SE CACHEA AQUÍ.
-        if (response.status === 200 && isView) {
-          return caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, response.clone());
-            return response;
-          });
-        }
-        return response;
-      }).catch(() => {
-        return caches.match(event.request);
-      })
-    );
+  if (event.request.method !== 'GET') {
     return;
   }
 
-  // Cache First para el resto (Assets estáticos)
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      return cachedResponse || fetch(event.request).then((response) => {
-        if (
-          event.request.method === 'GET' && 
-          response.status === 200
-        ) {
-          return caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, response.clone());
-            return response;
-          });
-        }
-        return response;
-      });
-    })
-  );
+  const url = new URL(event.request.url);
+
+  if (isSociosOrLotesRequest(url)) {
+    event.respondWith(staleWhileRevalidate(event.request, DATA_CACHE_NAME));
+    return;
+  }
+
+  if (shouldHandleWithNetworkFirst(event.request, url)) {
+    event.respondWith(networkFirst(event.request, SHELL_CACHE_NAME));
+  }
 });
