@@ -50,6 +50,11 @@
                 </button>
                 <div id="login-error" class="error-message"></div>
             </form>
+
+            <div class="brand-signature brand-signature-login" aria-label="Powered by LPSOLUTIONS">
+                <span class="brand-signature-label">Powered by</span>
+                <img src="img/LPpng/lpsolutionsblack.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-dark">
+            </div>
         </div>
     </div>
 
@@ -125,6 +130,10 @@
             </nav>
 
             <div id="sidebar-version" class="sidebar-version">v--</div>
+            <div class="brand-signature brand-signature-sidebar" aria-label="Powered by LPSOLUTIONS">
+                <span class="brand-signature-label">Powered by</span>
+                <img src="img/LPpng/lpsolutionswithe.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-light">
+            </div>
 
             <div class="user-profile">
                 <div class="user-avatar">
@@ -148,8 +157,14 @@
     <!-- Global Loader -->
     <div id="app-loader" class="app-loader hidden" aria-hidden="true">
         <div class="app-loader-card">
-            <div class="app-loader-spinner" aria-hidden="true"></div>
-            <div id="app-loader-text" class="app-loader-text">Cargando...</div>
+            <div class="app-loader-main">
+                <div class="app-loader-spinner" aria-hidden="true"></div>
+                <div id="app-loader-text" class="app-loader-text">Cargando...</div>
+            </div>
+            <div class="brand-signature brand-signature-loader" aria-label="Powered by LPSOLUTIONS">
+                <span class="brand-signature-label">Powered by</span>
+                <img src="img/LPpng/lpsolutionsblack.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-dark">
+            </div>
         </div>
     </div>
 
@@ -306,29 +321,83 @@
         </div>
     </div>
 
+    <div id="update-required-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="modal-backdrop update-required-backdrop"></div>
+        <div class="modal-card update-required-card" role="document">
+            <div class="update-required-badge">Nueva versión obligatoria</div>
+            <div class="modal-title">Actualizando la aplicación</div>
+            <div id="update-required-body" class="update-required-body">
+                Se detectó una nueva versión y debes actualizar para continuar usando el sistema.
+            </div>
+            <div class="update-required-status">
+                <div class="app-loader-spinner" aria-hidden="true"></div>
+                <span id="update-required-status-text">Preparando actualización...</span>
+            </div>
+            <button id="update-required-action" class="btn btn-primary update-required-action" type="button">
+                Actualizar ahora
+            </button>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script>
-        window.__APP_VERSION__ = '5.1.3';
+        window.__APP_VERSION__ = '5.1.4';
     </script>
-    <script src="js/config.js?v=5.1.3"></script>
+    <script src="js/config.js?v=5.1.4"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="js/app.js?v=5.1.3"></script>
+    <script src="js/app.js?v=5.1.4"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', async () => {
-                const appVersion = window.__APP_VERSION__ || '5.1.3';
+                const appVersion = window.__APP_VERSION__ || '5.1.4';
                 const updateMarkerKey = 'unoric-sw-updated-version';
+                const updateModal = document.getElementById('update-required-modal');
+                const updateBody = document.getElementById('update-required-body');
+                const updateStatusText = document.getElementById('update-required-status-text');
+                const updateAction = document.getElementById('update-required-action');
+                let pendingWorker = null;
+
+                const showForcedUpdateModal = (message, status = 'Actualizando...') => {
+                    if (updateBody) updateBody.textContent = message;
+                    if (updateStatusText) updateStatusText.textContent = status;
+                    if (updateModal) {
+                        updateModal.classList.remove('hidden');
+                        updateModal.setAttribute('aria-hidden', 'false');
+                    }
+                    document.body.classList.add('update-required-open');
+                };
+
+                const activateUpdate = (worker) => {
+                    pendingWorker = worker || pendingWorker;
+                    if (!pendingWorker) return;
+                    showForcedUpdateModal(
+                        `Se detectó la versión ${appVersion}. Debes actualizar para continuar usando el sistema.`,
+                        'Instalando actualización...'
+                    );
+                    pendingWorker.postMessage({ type: 'SKIP_WAITING' });
+                };
+
+                if (updateAction) {
+                    updateAction.addEventListener('click', () => {
+                        showForcedUpdateModal(
+                            `Se detectó la versión ${appVersion}. Debes actualizar para continuar usando el sistema.`,
+                            'Forzando actualización...'
+                        );
+                        activateUpdate(pendingWorker);
+                        window.setTimeout(() => window.location.reload(), 900);
+                    });
+                }
 
                 navigator.serviceWorker.addEventListener('controllerchange', () => {
                     if (sessionStorage.getItem(updateMarkerKey) === appVersion) return;
                     sessionStorage.setItem(updateMarkerKey, appVersion);
+                    showForcedUpdateModal(
+                        `La versión ${appVersion} ya está lista. Recargando la aplicación...`,
+                        'Recargando...'
+                    );
                     window.location.reload();
                 });
-
-                const activateUpdate = (worker) => {
-                    if (worker) worker.postMessage({ type: 'SKIP_WAITING' });
-                };
 
                 try {
                     const reg = await navigator.serviceWorker.register(`./service-worker.js?v=${appVersion}`);
@@ -336,6 +405,7 @@
                     if (versionEl) versionEl.textContent = `v${appVersion}`;
 
                     if (reg.waiting) {
+                        pendingWorker = reg.waiting;
                         activateUpdate(reg.waiting);
                     }
 
@@ -345,6 +415,7 @@
 
                         newWorker.addEventListener('statechange', () => {
                             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                pendingWorker = newWorker;
                                 activateUpdate(newWorker);
                             }
                         });

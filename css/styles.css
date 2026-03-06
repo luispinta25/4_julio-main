@@ -145,6 +145,41 @@ body {
     font-size: 0.95rem;
 }
 
+.brand-signature {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.brand-signature-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.brand-signature-logo {
+    display: block;
+    width: auto;
+    object-fit: contain;
+}
+
+.brand-signature-login {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(2, 48, 185, 0.08);
+}
+
+.brand-signature-login .brand-signature-label {
+    color: var(--text-muted);
+}
+
+.brand-signature-login .brand-signature-logo {
+    height: 22px;
+    opacity: 0.82;
+}
+
 .form-group {
     margin-bottom: 1.25rem;
     text-align: left;
@@ -535,6 +570,19 @@ body {
     text-align: center;
 }
 
+.brand-signature-sidebar {
+    padding: 0 1rem 1rem;
+}
+
+.brand-signature-sidebar .brand-signature-label {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.brand-signature-sidebar .brand-signature-logo {
+    height: 16px;
+    opacity: 0.88;
+}
+
 .nav-item {
     display: flex;
     align-items: center;
@@ -803,6 +851,14 @@ body {
     box-shadow: var(--shadow);
     padding: 1.25rem 1.5rem;
     display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.9rem;
+    min-width: 220px;
+}
+
+.app-loader-main {
+    display: flex;
     align-items: center;
     gap: 0.75rem;
 }
@@ -819,6 +875,15 @@ body {
 .app-loader-text {
     color: var(--text-color);
     font-weight: 600;
+}
+
+.brand-signature-loader .brand-signature-label {
+    color: var(--text-muted);
+}
+
+.brand-signature-loader .brand-signature-logo {
+    height: 20px;
+    opacity: 0.82;
 }
 
 @keyframes appSpin {
@@ -915,6 +980,58 @@ body {
     margin-top: 1rem;
     padding-top: 1rem;
     border-top: 1px solid var(--border-color);
+}
+
+body.update-required-open {
+    overflow: hidden;
+}
+
+.update-required-backdrop {
+    background: rgba(2, 6, 23, 0.72);
+    backdrop-filter: blur(4px);
+}
+
+.update-required-card {
+    max-width: 420px;
+    padding: 1.5rem;
+    text-align: center;
+    border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
+    box-shadow: var(--shadow-xl);
+}
+
+.update-required-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.35rem 0.7rem;
+    margin-bottom: 1rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary-color) 12%, white);
+    color: var(--primary-color);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.update-required-body {
+    margin-top: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+
+.update-required-status {
+    margin-top: 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    color: var(--text-color);
+    font-weight: 700;
+}
+
+.update-required-action {
+    margin-top: 1.5rem;
 }
 
 /* Switch */

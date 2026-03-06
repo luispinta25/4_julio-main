@@ -12,7 +12,7 @@ let filteredLotes = [];
 
 // Constants
 const REGULARIZACION_CORTE_FECHA = '2025-11-30';
-const APP_VERSION = window.__APP_VERSION__ || '5.1.3';
+const APP_VERSION = window.__APP_VERSION__ || '5.1.4';
 
 // DOM Elements
 const loginView = document.getElementById('login-view');
