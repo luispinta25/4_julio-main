@@ -51,9 +51,9 @@
                 <div id="login-error" class="error-message"></div>
             </form>
 
-            <div class="brand-signature brand-signature-login" aria-label="Powered by LPSOLUTIONS">
+            <div class="brand-signature brand-signature-login" aria-label="Powered by LPSOLUTIONS" style="display:flex; flex-direction:column; align-items:center; gap:0.35rem; margin-top:1.5rem; max-width:100%; overflow:hidden;">
                 <span class="brand-signature-label">Powered by</span>
-                <img src="img/LPpng/lpsolutionsblack.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-dark">
+                <img src="img/LPpng/lpsolutionsblack.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-dark" width="142" height="22" style="display:block; width:auto; max-width:142px; height:22px; object-fit:contain; opacity:0.82;">
             </div>
         </div>
     </div>
@@ -130,9 +130,9 @@
             </nav>
 
             <div id="sidebar-version" class="sidebar-version">v--</div>
-            <div class="brand-signature brand-signature-sidebar" aria-label="Powered by LPSOLUTIONS">
+            <div class="brand-signature brand-signature-sidebar" aria-label="Powered by LPSOLUTIONS" style="display:flex; flex-direction:column; align-items:center; gap:0.35rem; max-width:100%; overflow:hidden;">
                 <span class="brand-signature-label">Powered by</span>
-                <img src="img/LPpng/lpsolutionswithe.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-light">
+                <img src="img/LPpng/lpsolutionswithe.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-light" width="120" height="16" style="display:block; width:auto; max-width:120px; height:16px; object-fit:contain; opacity:0.88;">
             </div>
 
             <div class="user-profile">
@@ -161,9 +161,9 @@
                 <div class="app-loader-spinner" aria-hidden="true"></div>
                 <div id="app-loader-text" class="app-loader-text">Cargando...</div>
             </div>
-            <div class="brand-signature brand-signature-loader" aria-label="Powered by LPSOLUTIONS">
+            <div class="brand-signature brand-signature-loader" aria-label="Powered by LPSOLUTIONS" style="display:flex; flex-direction:column; align-items:center; gap:0.35rem; max-width:100%; overflow:hidden;">
                 <span class="brand-signature-label">Powered by</span>
-                <img src="img/LPpng/lpsolutionsblack.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-dark">
+                <img src="img/LPpng/lpsolutionsblack.png" alt="LPSOLUTIONS" class="brand-signature-logo brand-signature-logo-dark" width="132" height="20" style="display:block; width:auto; max-width:132px; height:20px; object-fit:contain; opacity:0.82;">
             </div>
         </div>
     </div>
@@ -341,16 +341,16 @@
 
     <!-- Scripts -->
     <script>
-        window.__APP_VERSION__ = '5.1.4';
+        window.__APP_VERSION__ = '5.1.5';
     </script>
-    <script src="js/config.js?v=5.1.4"></script>
+    <script src="js/config.js?v=5.1.5"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="js/app.js?v=5.1.4"></script>
+    <script src="js/app.js?v=5.1.5"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', async () => {
-                const appVersion = window.__APP_VERSION__ || '5.1.4';
+                const appVersion = window.__APP_VERSION__ || '5.1.5';
                 const updateMarkerKey = 'unoric-sw-updated-version';
                 const updateModal = document.getElementById('update-required-modal');
                 const updateBody = document.getElementById('update-required-body');

@@ -1,4 +1,4 @@
-const APP_VERSION = '5.1.4';
+const APP_VERSION = '5.1.5';
 const SHELL_CACHE_NAME = `unoric-shell-${APP_VERSION}`;
 const DATA_CACHE_NAME = `unoric-data-${APP_VERSION}`;
 const CDN_ORIGINS = new Set([
@@ -13,8 +13,8 @@ const APP_SHELL_ASSETS = [
   './css/socios.css',
   './css/lotes.css',
   './css/pagos.css',
-  './js/app.js?v=5.1.4',
-  './js/config.js?v=5.1.4',
+  './js/app.js?v=5.1.5',
+  './js/config.js?v=5.1.5',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
