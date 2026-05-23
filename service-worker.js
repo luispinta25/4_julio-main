@@ -1,4 +1,4 @@
-const APP_VERSION = '5.1.5';
+const APP_VERSION = '5.2';
 const SHELL_CACHE_NAME = `unoric-shell-${APP_VERSION}`;
 const DATA_CACHE_NAME = `unoric-data-${APP_VERSION}`;
 const CDN_ORIGINS = new Set([

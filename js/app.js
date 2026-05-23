@@ -12,7 +12,7 @@ let filteredLotes = [];
 
 // Constants
 const REGULARIZACION_CORTE_FECHA = '2025-11-30';
-const APP_VERSION = window.__APP_VERSION__ || '5.1.5';
+const APP_VERSION = window.__APP_VERSION__ || '5.2';
 
 // DOM Elements
 const loginView = document.getElementById('login-view');
@@ -1125,6 +1125,40 @@ function buildLotesBySocioMap(lotes) {
     return map;
 }
 
+function getReportScopedLotes(lotes, filters) {
+    let scoped = Array.isArray(lotes) ? [...lotes] : [];
+
+    if (filters?.etapa && filters.etapa !== 'all') {
+        const etapaNum = Number(filters.etapa);
+        scoped = scoped.filter(l => Number(l.etapa) === etapaNum);
+    }
+
+    if (filters?.loteTerm) {
+        const needle = normalizeText(filters.loteTerm);
+        scoped = scoped.filter(l => normalizeText(l.lote).includes(needle));
+    }
+
+    return scoped;
+}
+
+function withReportScopedLotes(socio, lotes) {
+    const scopedLotes = Array.isArray(lotes) ? [...lotes] : [];
+    const etapas = Array.from(new Set(scopedLotes.map(l => Number(l.etapa)).filter(n => Number.isFinite(n)))).sort();
+    return {
+        ...socio,
+        _lotes: scopedLotes,
+        _etapas: etapas
+    };
+}
+
+function scopeSocioReportRowToEtapa(socio, etapa) {
+    const etapaNum = Number(etapa);
+    return withReportScopedLotes(
+        socio,
+        (socio._lotes || []).filter(l => Number(l.etapa) === etapaNum)
+    );
+}
+
 async function fetchPendientesPorSocios(cedulas) {
     const client = getSupabaseClient();
     const unique = Array.from(new Set((cedulas || []).map(c => String(c).trim()).filter(Boolean)));
@@ -1440,24 +1474,21 @@ async function computeSociosReportList(filters, needPendientes) {
     let list = (socios || []).map(s => {
         const cedula = String(s.cedula || '').trim();
         const socioLotes = cedula ? (lotesBySocio.get(cedula) || []) : [];
-        const etapas = Array.from(new Set(socioLotes.map(l => Number(l.etapa)).filter(n => Number.isFinite(n)))).sort();
-        return {
+        const scopedLotes = getReportScopedLotes(socioLotes, filters);
+        return withReportScopedLotes({
             ...s,
             cedula,
-            _lotes: socioLotes,
-            _etapas: etapas
-        };
+            _allLotes: socioLotes
+        }, scopedLotes);
     });
 
     if (filters.soloActivos) list = list.filter(s => isSocioActivoValue(s.estado));
     if (filters.soloConLotes) list = list.filter(s => (s._lotes || []).length > 0);
     if (filters.etapa !== 'all') {
-        const etapaNum = Number(filters.etapa);
-        list = list.filter(s => (s._lotes || []).some(l => Number(l.etapa) === etapaNum));
+        list = list.filter(s => (s._lotes || []).length > 0);
     }
     if (filters.loteTerm) {
-        const needle = normalizeText(filters.loteTerm);
-        list = list.filter(s => (s._lotes || []).some(l => normalizeText(l.lote).includes(needle)));
+        list = list.filter(s => (s._lotes || []).length > 0);
     }
     if (Number.isFinite(filters.yearDesde)) {
         list = list.filter(s => {
@@ -1890,7 +1921,7 @@ async function generateSociosPdfFromDashboard() {
                     etapasArr.forEach(e => {
                         const key = `ETAPA_${e}`;
                         if (!groups.has(key)) groups.set(key, []);
-                        groups.get(key).push(s);
+                        groups.get(key).push(scopeSocioReportRowToEtapa(s, e));
                     });
                 });
 
